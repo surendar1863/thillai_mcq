@@ -1,14 +1,22 @@
+import json
 import streamlit as st
 import firebase_admin
 from firebase_admin import credentials, firestore
 import pandas as pd
 
 # =========================
-# FIREBASE INITIALIZATION
+# FIREBASE INITIALIZATION  (for Streamlit Cloud)
 # =========================
 if not firebase_admin._apps:
-    cred = credentials.Certificate("firebase_key.json")  # replace with your key file
-    firebase_admin.initialize_app(cred)
+    try:
+        # Load from Streamlit Secrets (preferred on Streamlit Cloud)
+        firebase_config = dict(st.secrets["firebase"])
+        cred = credentials.Certificate(firebase_config)
+        firebase_admin.initialize_app(cred)
+    except Exception as e:
+        st.error("❌ Firebase initialization failed. Check your Streamlit Secrets.")
+        st.stop()
+
 db = firestore.client()
 
 # =========================
@@ -20,6 +28,7 @@ st.title("🧠 Online Quiz (Firebase Enabled)")
 # =========================
 # USER DETAILS
 # =========================
+st.markdown("### 👤 Participant Details")
 name = st.text_input("Enter your full name")
 email = st.text_input("Enter your email ID")
 
@@ -29,12 +38,17 @@ email = st.text_input("Enter your email ID")
 @st.cache_data
 def load_questions():
     df = pd.read_csv("questions.csv")
-    # Drop the Sl No column if present
-    if "Sl No" in df.columns:
+    if "Sl No" in df.columns:      # drop serial column if exists
         df = df.drop(columns=["Sl No"])
     return df
 
 questions_df = load_questions()
+
+# =========================
+# QUIZ FORM
+# =========================
+st.markdown("---")
+st.markdown("### 📝 Answer the following questions")
 
 answers = {}
 for i, row in questions_df.iterrows():
@@ -57,11 +71,12 @@ if st.button("Submit Quiz"):
             if selected == correct:
                 score += 1
 
+        # Display score popup
         st.success(f"🎯 {name}, you scored **{score}/{total_questions}**!")
 
-        # Save to Firestore (prevent multiple submissions)
-        doc_ref = db.collection("quiz_scores").where("email", "==", email).get()
-        if len(doc_ref) == 0:
+        # Check if this email already submitted
+        existing = db.collection("quiz_scores").where("email", "==", email).get()
+        if len(existing) == 0:
             db.collection("quiz_scores").add({
                 "name": name,
                 "email": email,
@@ -69,7 +84,7 @@ if st.button("Submit Quiz"):
             })
             st.info("✅ Your response has been recorded successfully!")
         else:
-            st.warning("⚠️ You have already submitted the quiz.")
+            st.warning("⚠️ You have already submitted the quiz. Only one attempt is allowed.")
 
         # =========================
         # DISPLAY LEADERBOARD
@@ -78,4 +93,7 @@ if st.button("Submit Quiz"):
         docs = db.collection("quiz_scores").stream()
         data = [{"Name": d.to_dict()["name"], "Score": d.to_dict()["score"]} for d in docs]
         df = pd.DataFrame(data)
-        st.table(df.sort_values(by="Score", ascending=False).reset_index(drop=True))
+        if len(df) > 0:
+            st.table(df.sort_values(by="Score", ascending=False).reset_index(drop=True))
+        else:
+            st.info("No submissions yet.")
