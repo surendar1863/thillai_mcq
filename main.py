@@ -9,10 +9,10 @@ import pandas as pd
 # =========================
 if not firebase_admin._apps:
     try:
-        firebase_config = dict(st.secrets["firebase"])  # from Streamlit Secrets
+        firebase_config = dict(st.secrets["firebase"])
         cred = credentials.Certificate(firebase_config)
         firebase_admin.initialize_app(cred)
-    except Exception as e:
+    except Exception:
         st.error("❌ Firebase initialization failed. Check your Streamlit Secrets.")
         st.stop()
 
@@ -22,12 +22,11 @@ db = firestore.client()
 # PAGE CONFIG
 # =========================
 st.set_page_config(page_title="MCQ Quiz App", layout="centered")
-st.title("🧠 Online Quiz (Firebase Enabled)")
+st.title("🧠 Online Quiz")
 
 # =========================
 # USER DETAILS
 # =========================
-st.markdown("### 👤 Participant Details")
 name = st.text_input("Enter your full name")
 
 # =========================
@@ -69,28 +68,13 @@ if st.button("Submit Quiz"):
             if selected != "--Select--" and selected == correct:
                 score += 1
 
-        # Show score popup
         st.success(f"🎯 {name}, you scored **{score}/{total_questions}**!")
 
-        # Check if this name already submitted
-        existing = db.collection("quiz_scores").where("name", "==", name).get()
-        if len(existing) == 0:
-            db.collection("quiz_scores").add({
-                "name": name,
-                "score": score
-            })
-            st.info("✅ Your response has been recorded successfully!")
-        else:
+        # Each user’s name as unique document ID
+        doc_ref = db.collection("quiz_scores").document(name)
+        doc = doc_ref.get()
+        if doc.exists:
             st.warning("⚠️ You have already submitted the quiz.")
-
-        # =========================
-        # DISPLAY LEADERBOARD
-        # =========================
-        st.subheader("🏅 Leaderboard (Live)")
-        docs = db.collection("quiz_scores").stream()
-        data = [{"Name": d.to_dict()["name"], "Score": d.to_dict()["score"]} for d in docs]
-        df = pd.DataFrame(data)
-        if len(df) > 0:
-            st.table(df.sort_values(by="Score", ascending=False).reset_index(drop=True))
         else:
-            st.info("No submissions yet.")
+            doc_ref.set({"name": name, "score": score})
+            st.info("✅ Your response has been recorded successfully!")
